@@ -1,0 +1,114 @@
+https://qiita.com/azul915/items/5b7063cbc80192343fc0
+
+* Dockerfile
+#+BEGIN_SRC sh :exports both
+FROM ruby:2.6.5
+
+# 必要なパッケージのインストール（基本的に必要になってくるものだと思うので削らないこと）
+RUN apt-get update -qq && \
+    apt-get install -y build-essential \
+                       libpq-dev \
+                       nodejs
+
+# 作業ディレクトリの位置
+ENV APP_ROOT /work
+ENV APP_USER smith
+
+# 実行ユーザの作成 1000版に固定 (linux用)
+RUN  useradd --shell /bin/bash -u 1000 -o -c "" -m $APP_USER --home $APP_ROOT
+
+# 作業ディレクトリ
+WORKDIR $APP_ROOT
+
+# ホスト側（ローカル）のGemfileを追加する
+COPY --chown=1000 ./Gemfile $APP_ROOT
+COPY --chown=1000 ./Gemfile.lock $APP_ROOT
+
+# 以降 smith(1000)で作業
+USER $APP_USER
+RUN cd $APP_ROOT
+
+# Gemfileのbundle install
+RUN bundle install
+ADD --chown=1000 . $APP_ROOT
+
+#+END_SRC
+
+* docker-compose.yml
+
+#+BEGIN_SRC sh :exports both
+version: '3'
+services:
+  db:
+    image: mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: root
+    ports:
+      - "3306:3306"
+
+  web:
+    build: .
+    command: rails s -p 3000 -b '0.0.0.0'
+    volumes:
+      - .:/work
+    ports:
+      - "3000:3000"
+    links:
+      - db
+
+#+END_SRC
+
+* Gemfile
+
+#+BEGIN_SRC ruby :exports both
+source 'https://rubygems.org'
+gem 'rails', '5.2.2'
+#+END_SRC
+
+* Gemfile.lock
+
+#+BEGIN_SRC sh :exports both
+touch Gemfile.lock
+#+END_SRC
+
+* rails new を実行する
+
+- ここでコンテナが作られるが、railsの情報が一部しか入っていないイメージになっている
+
+#+BEGIN_SRC sh :exports both
+docker-compose run web rails new . --force --database=mysql --skip-bundle
+#+END_SRC
+
+* config/database.ymlを変更する
+
+#+BEGIN_EXAMPLE
+default: &default
+  adapter: mysql2
+  encoding: utf8
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  username: root
+  password: password # docker-compose.ymlのMYSQL_ROOT_PASSWORD
+  host: db # docker-compose.ymlのservice名
+#+END_EXAMPLE
+
+
+* コンテナを再作成する
+
+#+BEGIN_SRC sh :exports both
+docker-compose build
+#+END_SRC
+
+* コンテナを再起動する
+
+#+BEGIN_SRC sh :exports both
+docker-compose up
+#+END_SRC
+
+* 別ターミナルで db:createを実行
+
+#+BEGIN_SRC sh :exports both
+docker-compose run web rails db:create
+#+END_SRC
+
+* http://localhost:3000 に接続して確認
